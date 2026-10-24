@@ -1,0 +1,25 @@
+.{
+    .name = .xegom,
+    .version = "0.0.0",
+    .fingerprint = 0x9f86ec0ab6e1c956, // Changing this has security and trust implications.
+
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .vulkan = .{
+            .url = "git+https://github.com/Snektron/vulkan-zig#0859c23d80a41463eb570119b8d47c1660af5a9f",
+            .hash = "vulkan-0.0.0-r7YtxySBAwCCf-g7TObns83sMJ5CnFhL2LRKbCSyMikM",
+        },
+        .vulkan_headers = .{
+            .url = "git+https://github.com/KhronosGroup/Vulkan-Headers#73814d006638aa00bd553215b054f0f02e457e22",
+            .hash = "N-V-__8AAFOXiQJm2niapwlfcDuQxKKSbS6BJkr-Yud5uZGS",
+        },
+    },
+
+    .paths = .{
+        "src",
+        "LICENSE",
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+    },
+}
