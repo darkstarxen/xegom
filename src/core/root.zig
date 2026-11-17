@@ -1,4 +1,5 @@
-const config = @import("config");
-const vulkan = @import("vulkan");
+pub const log = @import("log.zig");
+pub const config = @import("config");
+pub const vulkan = @import("vulkan");
 
-const log = @import("log.zig");
+pub const Instance = @import("instance.zig");
