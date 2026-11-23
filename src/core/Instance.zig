@@ -21,8 +21,8 @@ pub const Extension = enum {
     const map = std.StaticStringMap(Self).initComptime(kvs_list: {
         var tmp: [info.field_names.len]struct { []const u8, Self } = undefined;
         for (info.field_names, &tmp) |name, *pair| {
-            pair[1] = @field(Self, name);
-            pair[0] = pair[1].string();
+            pair.@"1" = @field(Self, name);
+            pair.@"0" = pair.@"1".string();
         }
 
         break :kvs_list tmp;
@@ -40,8 +40,8 @@ pub const Extension = enum {
         return map.get(name);
     }
 
-    pub fn string(self: Self) [:0]const u8 {
-        return strings.get(self);
+    pub fn string(extension: Self) [:0]const u8 {
+        return strings.get(extension);
     }
 };
 
@@ -57,9 +57,9 @@ pub const Specifications = struct {
     extensions: std.EnumSet(Extension),
 
     pub fn from(loader: vk.BaseWrapper, allocator: std.mem.Allocator) !Self {
-        var self = Self.init;
+        var specifications = Self.init;
         if (loader.dispatch.vkEnumerateInstanceVersion != null) {
-            self.version = @fromBackingInt(try loader.enumerateInstanceVersion());
+            specifications.version = @fromBackingInt(try loader.enumerateInstanceVersion());
         }
 
         const properties = try loader.enumerateInstanceExtensionPropertiesAlloc(null, allocator);
@@ -70,16 +70,16 @@ pub const Specifications = struct {
             const string = std.mem.span(ptr);
 
             if (Extension.from(string)) |extension|
-                self.extensions.insert(extension)
+                specifications.extensions.insert(extension)
             else
                 log.debug("'{s}' is not supported", .{string});
         }
 
-        return self;
+        return specifications;
     }
 
-    pub fn has(self: Self, extension: Extension) bool {
-        return self.extensions.contains(extension);
+    pub fn has(specifications: Self, extension: Extension) bool {
+        return specifications.extensions.contains(extension);
     }
 };
 
@@ -96,10 +96,7 @@ dispatch: vk.InstanceWrapperWithCustomDispatch(struct {
 }),
 
 pub const InitInfo = struct {
-    pub const Info = struct {
-        version: u32 = 0,
-        name: [:0]const u8 = &.{},
-    };
+    pub const Info = struct { version: u32, name: [:0]const u8 };
 
     engine: Info,
     application: Info,
@@ -113,10 +110,10 @@ pub const InitInfo = struct {
 };
 pub fn init(loader: vk.BaseWrapper, info: InitInfo, allocator: std.mem.Allocator) !root {
     const extensions = extensions: {
-        var index: u32 = 0;
         var it = info.specifications.extensions.iterator();
         const tmp = try allocator.alloc([*:0]const u8, info.specifications.extensions.count());
 
+        var index: u32 = 0;
         while (it.next()) |extension| : (index += 1) {
             tmp[index] = extension.string();
         }
@@ -159,16 +156,16 @@ pub fn init(loader: vk.BaseWrapper, info: InitInfo, allocator: std.mem.Allocator
     };
 }
 
-pub fn deinit(self: root, p_allocator: ?*const vk.AllocationCallbacks) void {
-    self.dispatch.destroyInstance(self.handle, p_allocator);
+pub fn deinit(instance: root, p_allocator: ?*const vk.AllocationCallbacks) void {
+    instance.dispatch.destroyInstance(instance.handle, p_allocator);
 }
 
-pub fn enumeratePhysicalDevices(self: root, allocator: std.mem.Allocator) ![]vk.PhysicalDevice {
-    return self.dispatch.enumeratePhysicalDevicesAlloc(self.handle, allocator);
+pub fn enumeratePhysicalDevices(instance: root, allocator: std.mem.Allocator) ![]vk.PhysicalDevice {
+    return instance.dispatch.enumeratePhysicalDevicesAlloc(instance.handle, allocator);
 }
 
-pub fn getWrapper(self: root, comptime DispatchType: type) vk.InstanceWrapperWithCustomDispatch(DispatchType) {
-    return .load(self.handle, self.dispatch.dispatch.vkGetInstanceProcAddr.?);
+pub fn getWrapper(instance: root, comptime DispatchType: type) vk.InstanceWrapperWithCustomDispatch(DispatchType) {
+    return .load(instance.handle, instance.dispatch.dispatch.vkGetInstanceProcAddr.?);
 }
 
 pub const Builder = struct {
@@ -186,55 +183,53 @@ pub const Builder = struct {
             .loader = loader,
             .allocator = allocator,
             .request = .{
-                .engine = .{},
-                .application = .{},
                 .specifications = .init,
+                .application = undefined,
+                .engine = .{ .version = 0, .name = &.{} },
             },
             .specifications = try .from(loader, allocator),
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        self.layers.deinit(self.allocator);
+    pub fn deinit(builder: *Self) void {
+        builder.layers.deinit(builder.allocator);
     }
 
-    pub fn setVersion(self: *Self, version: vk.Version) bool {
+    pub fn setVersion(builder: *Self, version: vk.Version) bool {
         std.debug.assert(version.toU32() >= vk.API_VERSION_1_0.toU32());
 
-        return if (self.specifications.version.toU32() >= version.toU32()) supported: {
-            self.specifications.version = version;
+        return if (builder.specifications.version.toU32() >= version.toU32()) supported: {
+            builder.specifications.version = version;
 
             break :supported true;
         } else false;
     }
 
-    pub fn addLayer(self: *Self, layer: [:0]const u8) !void {
-        try self.layers.append(self.allocator, layer);
+    pub fn addLayer(builder: *Self, layer: [:0]const u8) !void {
+        try builder.layers.append(builder.allocator, layer);
     }
 
-    pub fn enable(self: *Self, extension: anytype) bool {
+    pub fn enable(builder: *Self, extension: anytype) bool {
         const T = @TypeOf(extension);
         const target = if (comptime T == Extension)
             extension
-        else target: {
-            if (Extension.from(extension)) |tmp|
-                break :target tmp
-            else
-                return false;
-        };
+        else if (Extension.from(extension)) |tmp|
+            tmp
+        else
+            return false;
 
-        return if (self.specifications.has(target)) supported: {
-            self.request.specifications.extensions.insert(target);
+        return if (builder.specifications.has(target)) supported: {
+            builder.request.specifications.extensions.insert(target);
 
             break :supported true;
         } else false;
     }
 
-    pub fn build(self: Self, application: InitInfo.Info) !root {
-        var info = self.request;
+    pub fn build(builder: Self, application: InitInfo.Info) !root {
+        var info = builder.request;
         info.application = application;
-        info.layers = self.layers.items;
+        info.layers = builder.layers.items;
 
-        return .init(self.loader, info, self.allocator);
+        return .init(builder.loader, info, builder.allocator);
     }
 };
